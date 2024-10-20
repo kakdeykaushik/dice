@@ -1912,11 +1912,6 @@ func evalINFO(args []string, store *dstore.Store) []byte {
 }
 
 // TODO: Placeholder to support monitoring
-func evalCLIENT(args []string, store *dstore.Store) []byte {
-	return clientio.RespOK
-}
-
-// TODO: Placeholder to support monitoring
 func evalLATENCY(args []string, store *dstore.Store) []byte {
 	return clientio.Encode([]string{}, false)
 }
@@ -1952,6 +1947,29 @@ func evalSLEEP(args []string, store *dstore.Store) []byte {
 // and closes the MULTI transaction.
 func evalMULTI(args []string, store *dstore.Store) []byte {
 	return clientio.RespOK
+}
+
+func EvalCLIENT(args []string, httpOp bool, client *comm.Client, store *dstore.Store) []byte {
+	if len(args) == 0 {
+		return clientio.Encode(diceerrors.ErrWrongArgumentCount("CLIENT"), false)
+	}
+
+	subcommand := strings.ToUpper(args[0])
+	switch subcommand {
+	case GETNAME:
+		if client.Name == utils.EmptyStr {
+			return clientio.RespNIL
+		}
+		return clientio.Encode(client.Name, true)
+	case SETNAME:
+		if len(args) != 2 {
+			return clientio.Encode(diceerrors.ErrWrongArgumentCount("CLIENT|SETNAME"), false)
+		}
+		client.Name = args[1]
+		return clientio.RespOK
+	default:
+		return clientio.Encode(diceerrors.ErrUnknownSubcommand(subcommand), false)
+	}
 }
 
 // EvalQWATCH adds the specified key to the watch list for the caller client.
@@ -2476,7 +2494,7 @@ func evalCommand(args []string, store *dstore.Store) []byte {
 	case Info:
 		return evalCommandInfo(args[1:])
 	default:
-		return diceerrors.NewErrWithFormattedMessage("unknown subcommand '%s'. Try COMMAND HELP.", subcommand)
+		return clientio.Encode(diceerrors.ErrUnknownSubcommand(subcommand), false)
 	}
 }
 

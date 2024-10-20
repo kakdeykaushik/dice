@@ -39,4 +39,6 @@ const (
 	FAIL       string = "FAIL"
 	SIGNED     string = "SIGNED"
 	UNSIGNED   string = "UNSIGNED"
+	GETNAME    string = "GETNAME"
+	SETNAME    string = "SETNAME"
 )

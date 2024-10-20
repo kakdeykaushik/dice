@@ -39,6 +39,9 @@ func ExecuteCommand(c *cmd.DiceDBCmd, client *comm.Client, store *dstore.Store, 
 	switch diceCmd.Name {
 	// Old implementation kept as it is, but we will be moving
 	// to the new implementation soon for all commands
+
+	case "CLIENT":
+		return &EvalResponse{Result: EvalCLIENT(c.Args, httpOp, client, store), Error: nil}
 	case "SUBSCRIBE", "Q.WATCH":
 		return &EvalResponse{Result: EvalQWATCH(c.Args, httpOp, client, store), Error: nil}
 	case "UNSUBSCRIBE", "Q.UNWATCH":
