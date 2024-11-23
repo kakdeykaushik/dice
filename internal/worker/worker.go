@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -17,9 +18,11 @@ import (
 	"github.com/dicedb/dice/internal/auth"
 	"github.com/dicedb/dice/internal/clientio"
 	"github.com/dicedb/dice/internal/clientio/iohandler"
+	"github.com/dicedb/dice/internal/clientio/iohandler/netconn"
 	"github.com/dicedb/dice/internal/clientio/requestparser"
 	"github.com/dicedb/dice/internal/cmd"
 	diceerrors "github.com/dicedb/dice/internal/errors"
+	"github.com/dicedb/dice/internal/eval"
 	"github.com/dicedb/dice/internal/ops"
 	"github.com/dicedb/dice/internal/querymanager"
 	"github.com/dicedb/dice/internal/shard"
@@ -41,6 +44,7 @@ type Worker interface {
 
 type BaseWorker struct {
 	id                       string
+	Name                     string
 	ioHandler                iohandler.IOHandler
 	parser                   requestparser.Parser
 	shardManager             *shard.ShardManager
@@ -51,6 +55,7 @@ type BaseWorker struct {
 	preprocessingChan        chan *ops.StoreResponse
 	cmdWatchSubscriptionChan chan watchmanager.WatchSubscription
 	wl                       wal.AbstractWAL
+	lastCmd                  *cmd.DiceDBCmd
 }
 
 func NewWorker(wid string, responseChan, preprocessingChan chan *ops.StoreResponse,
@@ -70,6 +75,106 @@ func NewWorker(wid string, responseChan, preprocessingChan chan *ops.StoreRespon
 		cmdWatchSubscriptionChan: cmdWatchSubscriptionChan,
 		wl:                       wl,
 	}
+}
+
+// returns addr(client) and laddr(server) in formatted string
+func addr(fd int) (addr, laddr string, err error) {
+	// addr
+	sa, err := syscall.Getpeername(fd)
+	if err != nil {
+		return "", "", err
+	}
+	switch v := sa.(type) {
+	case *syscall.SockaddrInet4:
+		addr = net.IP(v.Addr[:]).String() + ":" + strconv.Itoa(v.Port)
+	case *syscall.SockaddrInet6:
+		addr = net.IP(v.Addr[:]).String() + ":" + strconv.Itoa(v.Port)
+	}
+
+	// laddr
+	sa, err = syscall.Getsockname(fd)
+	if err != nil {
+		return "", "", err
+	}
+	switch v := sa.(type) {
+	case *syscall.SockaddrInet4:
+		laddr = net.IP(v.Addr[:]).String() + ":" + strconv.Itoa(v.Port)
+	case *syscall.SockaddrInet6:
+		laddr = net.IP(v.Addr[:]).String() + ":" + strconv.Itoa(v.Port)
+	}
+
+	return addr, laddr, nil
+}
+
+func (w *BaseWorker) String() string {
+	var builder strings.Builder
+
+	// id
+	builder.WriteString("id=")
+	builder.WriteString(w.ID())
+	builder.WriteString(" ")
+
+	// addr, laddr and fd
+	if h, ok := w.ioHandler.(*netconn.IOHandler); ok {
+		addr, laddr, _ := addr(h.FileDescriptor())
+		builder.WriteString("addr=")
+		builder.WriteString(addr)
+		builder.WriteString(" ")
+
+		builder.WriteString("laddr=")
+		builder.WriteString(laddr)
+		builder.WriteString(" ")
+
+		builder.WriteString("fd=")
+		builder.WriteString(strconv.FormatInt(int64(h.FileDescriptor()), 10))
+		builder.WriteString(" ")
+	}
+
+	// name
+	builder.WriteString("name=")
+	builder.WriteString(w.Name)
+	builder.WriteString(" ")
+
+	// age
+	builder.WriteString("age=")
+	builder.WriteString(strconv.FormatFloat(time.Since(w.Session.CreatedAt).Seconds(), 'f', 0, 64))
+	builder.WriteString(" ")
+
+	// idle
+	builder.WriteString("idle=")
+	builder.WriteString(strconv.FormatFloat(time.Since(w.Session.LastAccessedAt).Seconds(), 'f', 0, 64))
+	builder.WriteString(" ")
+
+	// // flags
+	// s.WriteString("flags=")
+	// s.WriteString("")
+	// s.WriteString(" ")
+
+	// argv-mem
+	// s.WriteString("argv-mem=")
+	// s.WriteString(strconv.FormatInt(int64(c.ArgLenSum), 10))
+	// s.WriteString(" ")
+
+	// cmd
+	builder.WriteString("cmd=")
+	if w.lastCmd == nil {
+		builder.WriteString("NULL")
+	} else {
+		// todo: handle `CLIENT ID` as "client|id" and `SET k 1` as "set"
+		builder.WriteString(strings.ToLower(w.lastCmd.Cmd))
+	}
+	builder.WriteString(" ")
+
+	// user
+	builder.WriteString("user=")
+	if w.Session == nil || w.Session.User == nil {
+		builder.WriteString("default")
+	} else {
+		builder.WriteString(w.Session.User.Username)
+	}
+	builder.WriteString(" ")
+
+	return builder.String()
 }
 
 func (w *BaseWorker) ID() string {
@@ -200,6 +305,13 @@ func (w *BaseWorker) executeCommandHandler(execCtx context.Context, errChan chan
 			slog.Debug("Connection closed for worker", slog.String("workerID", w.id), slog.Any("error", err))
 			errChan <- err
 		}
+	}
+
+	// just to keep track of last cmd
+	if _, ok := eval.DiceCmds[cmds[0].Cmd]; ok {
+		w.lastCmd = cmds[0]
+	} else {
+		w.lastCmd = nil
 	}
 }
 
