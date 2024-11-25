@@ -35,6 +35,10 @@ var (
 	requestCounter uint32
 )
 
+const (
+	flagNrml = "N"
+)
+
 // Worker interface
 type Worker interface {
 	ID() string
@@ -106,6 +110,11 @@ func addr(fd int) (addr, laddr string, err error) {
 	return addr, laddr, nil
 }
 
+func (w *BaseWorker) flag() string {
+	// todo: add more flags once we have required capabalities implemented
+	return flagNrml
+}
+
 func (w *BaseWorker) String() string {
 	var builder strings.Builder
 
@@ -145,15 +154,10 @@ func (w *BaseWorker) String() string {
 	builder.WriteString(strconv.FormatFloat(time.Since(w.Session.LastAccessedAt).Seconds(), 'f', 0, 64))
 	builder.WriteString(" ")
 
-	// // flags
-	// s.WriteString("flags=")
-	// s.WriteString("")
-	// s.WriteString(" ")
-
-	// argv-mem
-	// s.WriteString("argv-mem=")
-	// s.WriteString(strconv.FormatInt(int64(c.ArgLenSum), 10))
-	// s.WriteString(" ")
+	// flags
+	builder.WriteString("flags=")
+	builder.WriteString(w.flag())
+	builder.WriteString(" ")
 
 	// cmd
 	builder.WriteString("cmd=")
@@ -172,6 +176,16 @@ func (w *BaseWorker) String() string {
 	} else {
 		builder.WriteString(w.Session.User.Username)
 	}
+	builder.WriteString(" ")
+
+	// redir - Client enabled keys tracking in order to perform client side caching.
+	builder.WriteString("redir=")
+	builder.WriteString("-1") // we don't support support this yet, default -1
+	builder.WriteString(" ")
+
+	// resp
+	builder.WriteString("resp=")
+	builder.WriteString("2") // we only support RESP2
 	builder.WriteString(" ")
 
 	return builder.String()
